@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "FuseHub",
+    "slug": "TodoApp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fusehub.todoapp"
+    },
+    "android": {
+      "package": "com.fusehub.todoapp",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f172a"
+      },
+      "package": "com.fusehub.todoapp"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "todoapp",
+    "plugins": ["expo-font", "@react-native-google-signin/google-signin"],
+    "extra": {
+      "eas": {
+        "projectId": "cbd6448d-ddd1-4f90-80ae-608e8738dfce"
+      }
+    }
+  }
+}
