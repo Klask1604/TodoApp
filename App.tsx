@@ -1,10 +1,12 @@
+// App.tsx - UPDATED with NotificationsProvider
 import React from "react";
 import { StatusBar } from "expo-status-bar";
-import { View, ActivityIndicator, StyleSheet, Text } from "react-native";
+import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { Provider as PaperProvider, DefaultTheme } from "react-native-paper";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./src/contexts/AuthContext";
 import { DataProvider } from "./src/contexts/DataContext";
+import { NotificationsProvider } from "./src/contexts/NotificationsContext";
 import { AppNavigator } from "./src/navigation/AppNavigator";
 import { LoginScreen } from "./src/screens/LoginScreen";
 
@@ -42,10 +44,14 @@ export default function App() {
     <SafeAreaProvider>
       <PaperProvider theme={theme}>
         <AuthProvider>
-          <DataProvider>
-            <StatusBar style="light" />
-            <AppContent />
-          </DataProvider>
+          {/* 🆕 NotificationsProvider trebuie să fie înăuntru AuthProvider 
+              dar în afara DataProvider pentru a avea acces la user */}
+          <NotificationsProvider>
+            <DataProvider>
+              <StatusBar style="light" />
+              <AppContent />
+            </DataProvider>
+          </NotificationsProvider>
         </AuthProvider>
       </PaperProvider>
     </SafeAreaProvider>

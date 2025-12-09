@@ -10,6 +10,7 @@ import {
 import { Avatar, TextInput, Button, Divider } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../contexts/AuthContext";
+import { NotificationSettings } from "../components/NotificationSettings";
 
 const inputTheme = {
   colors: {
@@ -59,6 +60,7 @@ export const ProfileScreen = () => {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <NotificationSettings />
       <View style={styles.header}>
         <Text style={styles.title}>Profile</Text>
       </View>

@@ -20,6 +20,8 @@ export interface Task {
   created_at: string;
   updated_at: string;
   order_index: number;
+  notification_minutes_before?: number; // Minute înainte de due_date pentru notificare
+  enable_notification?: boolean; // Dacă notificarea este activată
 }
 
 export interface UserProfile {

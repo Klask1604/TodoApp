@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "486843626210",
+    "project_id": "todosopm",
+    "storage_bucket": "todosopm.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:486843626210:android:088bcfde9b0213fcde24bb",
+        "android_client_info": {
+          "package_name": "com.fusehub.todoapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBX_6V8M4uJkfhJiXSzkC60UI2J4Anp2rk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

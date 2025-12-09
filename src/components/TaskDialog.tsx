@@ -1,3 +1,4 @@
+// src/components/TaskDialog.tsx - UPDATED with Notifications
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -7,12 +8,16 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  Alert,
 } from "react-native";
 import { TextInput, Button, Chip } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { format, parseISO } from "date-fns";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useData } from "../contexts/DataContext";
+import { useNotifications } from "../contexts/NotificationsContext"; // 🆕 ADĂUGAT
+import { NotificationsService } from "../services/notifications";
 import { Task, TaskStatus } from "../types";
 
 interface TaskDialogProps {
@@ -27,6 +32,10 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
   task,
 }) => {
   const { categories, addTask, updateTask } = useData();
+  const { scheduleTaskReminder, cancelNotification, isRegistered } =
+    useNotifications(); // 🆕 ADĂUGAT
+  const insets = useSafeAreaInsets(); // Pentru a evita suprapunerea cu bara de navigare
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -37,6 +46,11 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // 🆕 State pentru notificări
+  const [enableNotification, setEnableNotification] = useState(true);
+  const [notificationMinutesBefore, setNotificationMinutesBefore] =
+    useState(60); // 1 oră înainte
+
   useEffect(() => {
     if (task) {
       setTitle(task.title);
@@ -46,6 +60,9 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
       setSelectedCategoryColor(category?.color || "#3b82f6");
       setStatus(task.status || "upcoming");
       setDueDate(task.due_date ? parseISO(task.due_date) : undefined);
+      // 🆕 Încarcă setările de notificare salvate
+      setEnableNotification(task.enable_notification ?? true);
+      setNotificationMinutesBefore(task.notification_minutes_before ?? 60);
     } else {
       const defaultCategory = categories.find((c) => c.is_default);
       if (defaultCategory) {
@@ -61,6 +78,8 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
     setDescription("");
     setStatus("upcoming");
     setDueDate(undefined);
+    setEnableNotification(true);
+    setNotificationMinutesBefore(60);
     const defaultCategory = categories.find((c) => c.is_default);
     if (defaultCategory) {
       setCategoryId(defaultCategory.id);
@@ -79,18 +98,55 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
         category_id: categoryId,
         status,
         due_date: dueDate?.toISOString(),
+        // 🆕 Salvează setările de notificare
+        enable_notification: enableNotification,
+        notification_minutes_before: enableNotification
+          ? notificationMinutesBefore
+          : undefined,
       };
+
+      let savedTaskId: string;
 
       if (task) {
         await updateTask(task.id, taskData);
+        savedTaskId = task.id;
       } else {
-        await addTask(taskData);
+        // Pentru task nou, obținem ID-ul din răspuns
+        const newTask = await addTask(taskData);
+        savedTaskId = newTask.id;
+      }
+
+      // 🆕 Gestionare notificări
+      if (savedTaskId && isRegistered) {
+        // Anulează notificările existente pentru acest task
+        const scheduled =
+          await NotificationsService.getScheduledNotifications();
+        for (const notification of scheduled) {
+          if (notification.content.data?.taskId === savedTaskId) {
+            await cancelNotification(notification.identifier);
+          }
+        }
+
+        // Programează notificare nouă dacă este activată și există due date
+        if (enableNotification && dueDate) {
+          const notificationId = await scheduleTaskReminder(
+            savedTaskId,
+            title.trim(),
+            dueDate,
+            notificationMinutesBefore
+          );
+
+          if (notificationId) {
+            console.log(`✅ Notificare programată pentru task "${title}"`);
+          }
+        }
       }
 
       onDismiss();
       resetForm();
     } catch (error) {
       console.error("Error saving task:", error);
+      Alert.alert("Error", "Failed to save task. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -113,6 +169,15 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
       setDueDate(newDate);
     }
   };
+
+  // 🆕 Opțiuni pentru reminder-ul de notificare
+  const notificationOptions = [
+    { label: "15 min", value: 15 },
+    { label: "30 min", value: 30 },
+    { label: "1 oră", value: 60 },
+    { label: "2 ore", value: 120 },
+    { label: "1 zi", value: 1440 },
+  ];
 
   return (
     <Modal
@@ -140,6 +205,7 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
               onChangeText={setTitle}
               style={[styles.input, { color: title ? "#ffffff" : undefined }]}
               mode="outlined"
+              textColor="#fff"
               theme={{
                 colors: {
                   primary: selectedCategoryColor,
@@ -165,6 +231,7 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
                 { color: description ? "#ffffff" : undefined },
               ]}
               mode="outlined"
+              textColor="#fff"
               theme={{
                 colors: {
                   primary: selectedCategoryColor,
@@ -259,6 +326,76 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
               </Button>
             )}
 
+            {/* 🆕 Secțiune notificări */}
+            {dueDate && isRegistered && (
+              <View style={styles.notificationSection}>
+                <View style={styles.notificationHeader}>
+                  <View style={styles.notificationTitleRow}>
+                    <Ionicons
+                      name="notifications"
+                      size={20}
+                      color={
+                        enableNotification ? selectedCategoryColor : "#6b7280"
+                      }
+                    />
+                    <Text style={styles.notificationTitle}>
+                      Reminder Notification
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setEnableNotification(!enableNotification)}
+                  >
+                    <Ionicons
+                      name={enableNotification ? "toggle" : "toggle-outline"}
+                      size={32}
+                      color={
+                        enableNotification ? selectedCategoryColor : "#6b7280"
+                      }
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {enableNotification && (
+                  <>
+                    <Text style={styles.notificationSubtitle}>
+                      Notify me before:
+                    </Text>
+                    <View style={styles.notificationOptions}>
+                      {notificationOptions.map((option) => (
+                        <Chip
+                          key={option.value}
+                          selected={notificationMinutesBefore === option.value}
+                          selectedColor="#ffffff"
+                          onPress={() =>
+                            setNotificationMinutesBefore(option.value)
+                          }
+                          style={[
+                            styles.chip,
+                            notificationMinutesBefore === option.value && {
+                              backgroundColor: selectedCategoryColor,
+                            },
+                          ]}
+                          textStyle={{ color: "#fff" }}
+                        >
+                          {option.label}
+                        </Chip>
+                      ))}
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* 🆕 Avertisment dacă notificările nu sunt activate */}
+            {dueDate && !isRegistered && (
+              <View style={styles.warningBox}>
+                <Ionicons name="warning" size={20} color="#f59e0b" />
+                <Text style={styles.warningText}>
+                  Enable notifications in settings to get reminders
+                </Text>
+              </View>
+            )}
+
             {showDatePicker && (
               <DateTimePicker
                 value={dueDate || new Date()}
@@ -278,7 +415,12 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
             )}
           </ScrollView>
 
-          <View style={styles.footer}>
+          <View
+            style={[
+              styles.footer,
+              { paddingBottom: Math.max(insets.bottom, 20) },
+            ]}
+          >
             <Button
               mode="outlined"
               onPress={onDismiss}
@@ -376,6 +518,58 @@ const styles = StyleSheet.create({
   clearButton: {
     marginBottom: 16,
   },
+  // 🆕 Styles pentru secțiunea de notificări
+  notificationSection: {
+    backgroundColor: "rgba(59, 130, 246, 0.1)",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.3)",
+  },
+  notificationHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  notificationTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  notificationTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  notificationSubtitle: {
+    fontSize: 14,
+    color: "rgba(255, 255, 255, 0.7)",
+    marginBottom: 8,
+  },
+  notificationOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  warningBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.3)",
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#f59e0b",
+  },
   footer: {
     flexDirection: "row",
     gap: 12,
@@ -390,3 +584,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
+/* 
+NOTĂ IMPORTANTĂ:
+Pentru ca notificările să funcționeze corect cu task-uri noi, 
+trebuie să modifici funcția addTask din DataContext să returneze task-ul creat:
+
+const addTask = async (task: ...) => {
+  const { data, error } = await supabase
+    .from('tasks')
+    .insert({ ...task, user_id: user.id, order_index: tasks.length })
+    .select()
+    .single();  // ← adaugă .select().single()
+    
+  if (error) throw error;
+  await refreshData();
+  return data;  // ← returnează task-ul creat
+};
+*/

@@ -7,12 +7,13 @@ import { HomeScreen } from "../screens/HomeScreen";
 import { TasksScreen } from "../screens/TasksScreen";
 import { ReportsScreen } from "../screens/ReportsScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
+import { navigationRef } from "../contexts/NotificationsContext";
 
 const Tab = createBottomTabNavigator();
 
 export const AppNavigator = () => {
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <SafeAreaView style={{ flex: 1, backgroundColor: "#0f172a" }}>
         <Tab.Navigator
           screenOptions={({ route }) => ({

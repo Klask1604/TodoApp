@@ -18,6 +18,7 @@
     },
     "android": {
       "package": "com.fusehub.todoapp",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f172a"
@@ -28,7 +29,18 @@
       "favicon": "./assets/favicon.png"
     },
     "scheme": "todoapp",
-    "plugins": ["expo-font", "@react-native-google-signin/google-signin"],
+    "plugins": [
+      "expo-font",
+      "@react-native-google-signin/google-signin",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#3b82f6",
+          "sounds": ["./assets/notification_sound.wav"]
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "cbd6448d-ddd1-4f90-80ae-608e8738dfce"
