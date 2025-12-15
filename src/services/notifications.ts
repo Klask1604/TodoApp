@@ -56,7 +56,8 @@ export class NotificationsService {
       }
 
       // Obține Expo push token
-      // Notă: Pe Android, aceasta necesită FCM credentials configurate în EAS
+      // Notă: În Expo Go pe Android (SDK 53+), remote push nu este suportat
+      // Local notifications funcționează perfect!
       try {
         token = (
           await Notifications.getExpoPushTokenAsync({
@@ -66,21 +67,27 @@ export class NotificationsService {
 
         console.log("✅ Push token obținut:", token);
       } catch (pushTokenError: any) {
-        // Dacă este eroare Firebase/FCM, logăm un mesaj mai util
+        const errorMessage = pushTokenError?.message || "";
+
+        // Expo Go pe Android nu mai suportă remote push din SDK 53
         if (
-          pushTokenError?.message?.includes("Firebase") ||
-          pushTokenError?.message?.includes("FCM")
+          errorMessage.includes("Expo Go") ||
+          errorMessage.includes("development build") ||
+          errorMessage.includes("Firebase") ||
+          errorMessage.includes("FCM")
         ) {
-          console.warn(
-            "⚠️ Push notifications necesită FCM credentials. " +
-              "Notificările locale vor funcționa, dar push notifications nu. " +
-              "Vezi: https://docs.expo.dev/push-notifications/fcm-credentials/"
+          console.log(
+            "ℹ️ Remote push notifications nu sunt disponibile în Expo Go pe Android.\n" +
+            "✅ Local notifications (task reminders) funcționează perfect!\n" +
+            "📱 Pentru remote push, folosește EAS Build: npx eas build"
           );
-          // Returnăm null, dar nu aruncăm eroarea - notificările locale vor funcționa
+          // Returnăm null - notificările locale vor funcționa
           return null;
         }
-        // Pentru alte erori, aruncăm mai departe
-        throw pushTokenError;
+
+        // Pentru alte erori neașteptate
+        console.warn("⚠️ Eroare neașteptată la obținere push token:", errorMessage);
+        return null;
       }
 
       return token;

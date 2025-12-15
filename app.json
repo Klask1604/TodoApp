@@ -18,12 +18,10 @@
     },
     "android": {
       "package": "com.fusehub.todoapp",
-      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f172a"
-      },
-      "package": "com.fusehub.todoapp"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -31,7 +29,6 @@
     "scheme": "todoapp",
     "plugins": [
       "expo-font",
-      "@react-native-google-signin/google-signin",
       [
         "expo-notifications",
         {
