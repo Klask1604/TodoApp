@@ -1,10 +1,11 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import { Checkbox } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { Task, Category } from "../types";
 import { format, parseISO, isToday, isTomorrow, isPast } from "date-fns";
 import { useData } from "../contexts/DataContext";
+import { useNotifications } from "../contexts/NotificationsContext";
 
 interface TaskCardProps {
   task: Task;
@@ -18,6 +19,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onPress,
 }) => {
   const { updateTask, deleteTask } = useData();
+   // notificare imediată
+  const { sendLocalNotification, isRegistered } = useNotifications();
 
   const handleStatusChange = async () => {
     await updateTask(task.id, {
@@ -29,8 +32,30 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     await deleteTask(task.id);
   };
 
+  const handleSendReminderNow = async () => {
+    if (!isRegistered) {
+      Alert.alert(
+        "Notificări dezactivate",
+        "Activează notificările în setări pentru a trimite reminder."
+      );
+      return;
+    }
+
+    try {
+      await sendLocalNotification(
+        "Task reminder",
+        `"${task.title}" are un reminder acum`,
+        { type: "task_reminder", taskId: task.id }
+      );
+    } catch (error) {
+      console.error("Error sending reminder now:", error);
+      Alert.alert("Eroare", "Nu am putut trimite notificarea acum.");
+    }
+  };
+
   const isCompleted = task.status === "completed";
   const isCanceled = task.status === "canceled";
+  const canSendReminder = !isCompleted && !isCanceled;
 
   const getStatusBadge = () => {
     if (isCompleted) return null;
@@ -138,6 +163,14 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         </View>
 
         <View style={styles.actions}>
+          {canSendReminder && (
+            <TouchableOpacity
+              onPress={handleSendReminderNow}
+              style={styles.actionButton}
+            >
+              <Ionicons name="notifications" size={18} color="#f59e0b" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={onPress} style={styles.actionButton}>
             <Ionicons name="pencil" size={18} color="#60a5fa" />
           </TouchableOpacity>

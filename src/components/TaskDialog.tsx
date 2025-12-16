@@ -1,5 +1,5 @@
-// src/components/TaskDialog.tsx - UPDATED with Notifications
-import React, { useState, useEffect } from "react";
+// src/components/TaskDialog.tsx - FINAL with Persistent Notification Preferences
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,11 +13,10 @@ import {
 import { TextInput, Button, Chip } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, differenceInMinutes } from "date-fns";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useData } from "../contexts/DataContext";
-import { useNotifications } from "../contexts/NotificationsContext"; // 🆕 ADĂUGAT
-import { NotificationsService } from "../services/notifications";
+import { useNotifications } from "../contexts/NotificationsContext";
 import { Task, TaskStatus } from "../types";
 
 interface TaskDialogProps {
@@ -32,9 +31,9 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
   task,
 }) => {
   const { categories, addTask, updateTask } = useData();
-  const { scheduleTaskReminder, cancelNotification, isRegistered } =
-    useNotifications(); // 🆕 ADĂUGAT
-  const insets = useSafeAreaInsets(); // Pentru a evita suprapunerea cu bara de navigare
+  const { scheduleTaskReminder, isRegistered } = useNotifications();
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 16);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -45,11 +44,13 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(false);
+  // State temporar pentru iOS picker (permite editare fără blocare)
+  const [tempDate, setTempDate] = useState<Date>(new Date());
 
-  // 🆕 State pentru notificări
+  // 🆕 Notification preferences - vor fi salvate în DB
   const [enableNotification, setEnableNotification] = useState(true);
   const [notificationMinutesBefore, setNotificationMinutesBefore] =
-    useState(60); // 1 oră înainte
+    useState(60);
 
   useEffect(() => {
     if (task) {
@@ -60,7 +61,8 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
       setSelectedCategoryColor(category?.color || "#3b82f6");
       setStatus(task.status || "upcoming");
       setDueDate(task.due_date ? parseISO(task.due_date) : undefined);
-      // 🆕 Încarcă setările de notificare salvate
+
+      // 🆕 Load saved notification preferences
       setEnableNotification(task.enable_notification ?? true);
       setNotificationMinutesBefore(task.notification_minutes_before ?? 60);
     } else {
@@ -71,7 +73,7 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
       }
       resetForm();
     }
-  }, [task, visible]);
+  }, [task, visible, categories]);
 
   const resetForm = () => {
     setTitle("");
@@ -86,59 +88,122 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
     }
   };
 
+  // Calculează cât timp mai e până la due date
+  const minutesUntilDue = useMemo(() => {
+    if (!dueDate) return null;
+    return differenceInMinutes(dueDate, new Date());
+  }, [dueDate]);
+
+  // Generează opțiuni valide de notificare bazat pe timp rămas
+  const validNotificationOptions = useMemo(() => {
+    const allOptions = [
+      { label: "5 min", value: 5 },
+      { label: "15 min", value: 15 },
+      { label: "30 min", value: 30 },
+      { label: "1 oră", value: 60 },
+      { label: "2 ore", value: 120 },
+      { label: "1 zi", value: 1440 },
+    ];
+
+    if (!minutesUntilDue || minutesUntilDue <= 0) return allOptions;
+
+    // Filtrează doar opțiunile care sunt mai mici decât timpul rămas
+    const validOptions = allOptions.filter(
+      (opt) => opt.value < minutesUntilDue
+    );
+
+    return validOptions.length > 0
+      ? validOptions
+      : [{ label: "1 min", value: 1 }];
+  }, [minutesUntilDue]);
+
+  // Verifică dacă notificarea selectată e validă
+  const isNotificationValid = useMemo(() => {
+    if (!dueDate || !minutesUntilDue) return false;
+    return notificationMinutesBefore < minutesUntilDue;
+  }, [dueDate, minutesUntilDue, notificationMinutesBefore]);
+
+  // Auto-ajustează notification time dacă devine invalid
+  useEffect(() => {
+    if (dueDate && minutesUntilDue !== null && minutesUntilDue > 0) {
+      // Dacă notificarea selectată e prea mare, alege cea mai mare opțiune validă
+      if (notificationMinutesBefore >= minutesUntilDue) {
+        const maxValid =
+          validNotificationOptions[validNotificationOptions.length - 1];
+        if (maxValid) {
+          setNotificationMinutesBefore(maxValid.value);
+        }
+      }
+    }
+  }, [dueDate, minutesUntilDue, validNotificationOptions]);
+
   const handleSubmit = async () => {
     if (!title.trim() || !categoryId) return;
+
+    const isOverdue = minutesUntilDue !== null && minutesUntilDue <= 0;
+
+    // Validare notificare (doar pentru due date viitoare)
+    if (enableNotification && dueDate && !isOverdue && !isNotificationValid) {
+      Alert.alert(
+        "Invalid Notification",
+        `Nu poți seta o notificare cu ${notificationMinutesBefore} minute înainte când task-ul expiră în doar ${minutesUntilDue} minute.\n\nAlege o valoare mai mică sau schimbă due date-ul.`,
+        [{ text: "OK" }]
+      );
+      return;
+    }
 
     try {
       setLoading(true);
 
+      // 🆕 Include notification preferences în taskData
       const taskData = {
         title: title.trim(),
         description: description.trim(),
         category_id: categoryId,
         status,
         due_date: dueDate?.toISOString(),
-        // 🆕 Salvează setările de notificare
-        enable_notification: enableNotification,
-        notification_minutes_before: enableNotification
-          ? notificationMinutesBefore
-          : undefined,
+        enable_notification: enableNotification && !isOverdue,
+        notification_minutes_before:
+          enableNotification && !isOverdue ? notificationMinutesBefore : null,
       };
 
-      let savedTaskId: string;
+      let savedTask: Task;
 
       if (task) {
-        await updateTask(task.id, taskData);
-        savedTaskId = task.id;
+        await updateTask(task.id, taskData as Partial<Task>);
+        savedTask = { ...task, ...taskData } as Task;
       } else {
-        // Pentru task nou, obținem ID-ul din răspuns
-        const newTask = await addTask(taskData);
-        savedTaskId = newTask.id;
+        savedTask = await addTask(
+          taskData as Omit<
+            Task,
+            "id" | "user_id" | "created_at" | "updated_at" | "order_index"
+          >
+        );
       }
 
-      // 🆕 Gestionare notificări
-      if (savedTaskId && isRegistered) {
-        // Anulează notificările existente pentru acest task
-        const scheduled =
-          await NotificationsService.getScheduledNotifications();
-        for (const notification of scheduled) {
-          if (notification.content.data?.taskId === savedTaskId) {
-            await cancelNotification(notification.identifier);
-          }
-        }
+      // Programează notificare dacă este activată și validă (doar pentru due date viitoare)
+      if (
+        enableNotification &&
+        dueDate &&
+        isRegistered &&
+        savedTask.id &&
+        isNotificationValid &&
+        minutesUntilDue !== null &&
+        minutesUntilDue > 0
+      ) {
+        const notificationId = await scheduleTaskReminder(
+          savedTask.id,
+          title.trim(),
+          dueDate,
+          notificationMinutesBefore
+        );
 
-        // Programează notificare nouă dacă este activată și există due date
-        if (enableNotification && dueDate) {
-          const notificationId = await scheduleTaskReminder(
-            savedTaskId,
-            title.trim(),
-            dueDate,
-            notificationMinutesBefore
+        if (notificationId) {
+          console.log(
+            `✅ Notificare programată: ${notificationMinutesBefore} min înainte`
           );
-
-          if (notificationId) {
-            console.log(`✅ Notificare programată pentru task "${title}"`);
-          }
+        } else {
+          console.log(`⚠️ Notificarea nu a fost programată`);
         }
       }
 
@@ -153,31 +218,74 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
   };
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      setDueDate(selectedDate);
-      setShowTimePicker(true);
+    const isAndroid = Platform.OS === "android";
+
+    if (isAndroid) {
+      if (event.type === "dismissed") {
+        setShowDatePicker(false);
+        return;
+      }
+      if (selectedDate) {
+        setDueDate(selectedDate);
+        setShowDatePicker(false);
+        setShowTimePicker(true);
+      }
+    } else {
+      // Pe iOS, actualizăm doar tempDate pentru a permite editare continuă
+      if (selectedDate) {
+        setTempDate(selectedDate);
+      }
     }
   };
 
   const handleTimeChange = (event: any, selectedTime?: Date) => {
-    setShowTimePicker(false);
-    if (selectedTime && dueDate) {
-      const newDate = new Date(dueDate);
-      newDate.setHours(selectedTime.getHours());
-      newDate.setMinutes(selectedTime.getMinutes());
-      setDueDate(newDate);
+    const isAndroid = Platform.OS === "android";
+
+    if (isAndroid) {
+      if (event.type === "dismissed") {
+        setShowTimePicker(false);
+        return;
+      }
+      if (selectedTime && dueDate) {
+        const newDate = new Date(dueDate);
+        newDate.setHours(selectedTime.getHours());
+        newDate.setMinutes(selectedTime.getMinutes());
+        setDueDate(newDate);
+        setShowTimePicker(false);
+      }
+    } else {
+      // Pe iOS, actualizăm doar tempDate pentru a permite editare continuă
+      if (selectedTime) {
+        const newDate = new Date(tempDate);
+        newDate.setHours(selectedTime.getHours());
+        newDate.setMinutes(selectedTime.getMinutes());
+        setTempDate(newDate);
+      }
     }
   };
 
-  // 🆕 Opțiuni pentru reminder-ul de notificare
-  const notificationOptions = [
-    { label: "15 min", value: 15 },
-    { label: "30 min", value: 30 },
-    { label: "1 oră", value: 60 },
-    { label: "2 ore", value: 120 },
-    { label: "1 zi", value: 1440 },
-  ];
+  // Funcții pentru confirmare/anulare pe iOS
+  const handleConfirmDate = () => {
+    const confirmedDate = new Date(tempDate);
+    setDueDate(confirmedDate);
+    // Inițializează tempDate cu data confirmată pentru time picker
+    setTempDate(confirmedDate);
+    setShowDatePicker(false);
+    setShowTimePicker(true);
+  };
+
+  const handleConfirmTime = () => {
+    const finalDate = new Date(tempDate);
+    setDueDate(finalDate);
+    setShowTimePicker(false);
+  };
+
+  const handleCancelPicker = () => {
+    setShowDatePicker(false);
+    setShowTimePicker(false);
+    // Restore tempDate la dueDate existent sau data curentă
+    setTempDate(dueDate || new Date());
+  };
 
   return (
     <Modal
@@ -186,7 +294,7 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
       transparent={true}
       onRequestClose={onDismiss}
     >
-      <View style={styles.overlay}>
+      <View style={[styles.overlay, { paddingBottom: bottomInset }]}>
         <View style={styles.container}>
           <View style={styles.header}>
             <Text style={styles.title}>{task ? "Edit Task" : "New Task"}</Text>
@@ -302,7 +410,11 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
             <Text style={styles.label}>Due Date</Text>
             <TouchableOpacity
               style={styles.dateButton}
-              onPress={() => setShowDatePicker(true)}
+              onPress={() => {
+                // Inițializează tempDate cu dueDate existent sau data curentă
+                setTempDate(dueDate || new Date());
+                setShowDatePicker(true);
+              }}
             >
               <Ionicons
                 name="calendar"
@@ -316,6 +428,24 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
               </Text>
             </TouchableOpacity>
 
+            {/* Afișează timp rămas */}
+            {dueDate && minutesUntilDue !== null && (
+              <View style={styles.timeRemainingBox}>
+                <Ionicons name="time-outline" size={16} color="#60a5fa" />
+                <Text style={styles.timeRemainingText}>
+                  {minutesUntilDue > 0
+                    ? `Timp rămas: ${
+                        minutesUntilDue < 60
+                          ? `${minutesUntilDue} minute`
+                          : `${Math.floor(minutesUntilDue / 60)}h ${
+                              minutesUntilDue % 60
+                            }min`
+                      }`
+                    : "⚠️ Task-ul a expirat deja!"}
+                </Text>
+              </View>
+            )}
+
             {dueDate && (
               <Button
                 mode="text"
@@ -326,67 +456,82 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
               </Button>
             )}
 
-            {/* 🆕 Secțiune notificări */}
-            {dueDate && isRegistered && (
-              <View style={styles.notificationSection}>
-                <View style={styles.notificationHeader}>
-                  <View style={styles.notificationTitleRow}>
-                    <Ionicons
-                      name="notifications"
-                      size={20}
-                      color={
-                        enableNotification ? selectedCategoryColor : "#6b7280"
-                      }
-                    />
-                    <Text style={styles.notificationTitle}>
-                      Reminder Notification
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => setEnableNotification(!enableNotification)}
-                  >
-                    <Ionicons
-                      name={enableNotification ? "toggle" : "toggle-outline"}
-                      size={32}
-                      color={
-                        enableNotification ? selectedCategoryColor : "#6b7280"
-                      }
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                {enableNotification && (
-                  <>
-                    <Text style={styles.notificationSubtitle}>
-                      Notify me before:
-                    </Text>
-                    <View style={styles.notificationOptions}>
-                      {notificationOptions.map((option) => (
-                        <Chip
-                          key={option.value}
-                          selected={notificationMinutesBefore === option.value}
-                          selectedColor="#ffffff"
-                          onPress={() =>
-                            setNotificationMinutesBefore(option.value)
-                          }
-                          style={[
-                            styles.chip,
-                            notificationMinutesBefore === option.value && {
-                              backgroundColor: selectedCategoryColor,
-                            },
-                          ]}
-                          textStyle={{ color: "#fff" }}
-                        >
-                          {option.label}
-                        </Chip>
-                      ))}
+            {/* Secțiune notificări */}
+            {dueDate &&
+              isRegistered &&
+              minutesUntilDue &&
+              minutesUntilDue > 1 && (
+                <View style={styles.notificationSection}>
+                  <View style={styles.notificationHeader}>
+                    <View style={styles.notificationTitleRow}>
+                      <Ionicons
+                        name="notifications"
+                        size={20}
+                        color={
+                          enableNotification ? selectedCategoryColor : "#6b7280"
+                        }
+                      />
+                      <Text style={styles.notificationTitle}>
+                        Reminder Notification
+                      </Text>
                     </View>
-                  </>
-                )}
-              </View>
-            )}
+                    <TouchableOpacity
+                      onPress={() => setEnableNotification(!enableNotification)}
+                    >
+                      <Ionicons
+                        name={enableNotification ? "toggle" : "toggle-outline"}
+                        size={32}
+                        color={
+                          enableNotification ? selectedCategoryColor : "#6b7280"
+                        }
+                      />
+                    </TouchableOpacity>
+                  </View>
 
-            {/* 🆕 Avertisment dacă notificările nu sunt activate */}
+                  {enableNotification && (
+                    <>
+                      <Text style={styles.notificationSubtitle}>
+                        Notify me before:
+                      </Text>
+                      <View style={styles.notificationOptions}>
+                        {validNotificationOptions.map((option) => (
+                          <Chip
+                            key={option.value}
+                            selected={
+                              notificationMinutesBefore === option.value
+                            }
+                            selectedColor="#ffffff"
+                            onPress={() =>
+                              setNotificationMinutesBefore(option.value)
+                            }
+                            style={[
+                              styles.chip,
+                              notificationMinutesBefore === option.value && {
+                                backgroundColor: selectedCategoryColor,
+                              },
+                            ]}
+                            textStyle={{ color: "#fff" }}
+                          >
+                            {option.label}
+                          </Chip>
+                        ))}
+                      </View>
+
+                      {/* Warning dacă notificarea e invalidă */}
+                      {!isNotificationValid && (
+                        <View style={styles.invalidNotificationBox}>
+                          <Ionicons name="warning" size={16} color="#ef4444" />
+                          <Text style={styles.invalidNotificationText}>
+                            Notificarea ar fi în trecut! Task-ul expiră prea
+                            curând.
+                          </Text>
+                        </View>
+                      )}
+                    </>
+                  )}
+                </View>
+              )}
+
             {dueDate && !isRegistered && (
               <View style={styles.warningBox}>
                 <Ionicons name="warning" size={20} color="#f59e0b" />
@@ -396,29 +541,123 @@ export const TaskDialog: React.FC<TaskDialogProps> = ({
               </View>
             )}
 
+            {/* Date Picker - Modal dedicat pentru iOS */}
             {showDatePicker && (
-              <DateTimePicker
-                value={dueDate || new Date()}
-                mode="date"
-                display="default"
-                onChange={handleDateChange}
-              />
+              <>
+                {Platform.OS === "ios" ? (
+                  <Modal
+                    visible={showDatePicker}
+                    transparent={true}
+                    animationType="slide"
+                    onRequestClose={handleCancelPicker}
+                  >
+                    <View style={styles.pickerModalOverlay}>
+                      <View style={styles.pickerModalContainer}>
+                        <View style={styles.pickerModalHeader}>
+                          <TouchableOpacity onPress={handleCancelPicker}>
+                            <Text style={styles.pickerModalButton}>Cancel</Text>
+                          </TouchableOpacity>
+                          <Text style={styles.pickerModalTitle}>
+                            Select Date
+                          </Text>
+                          <TouchableOpacity onPress={handleConfirmDate}>
+                            <Text
+                              style={[
+                                styles.pickerModalButton,
+                                styles.pickerModalButtonConfirm,
+                              ]}
+                            >
+                              Done
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.pickerContent}>
+                          <DateTimePicker
+                            value={tempDate}
+                            mode="date"
+                            display="spinner"
+                            onChange={handleDateChange}
+                            minimumDate={new Date()}
+                            textColor="#ffffff"
+                            themeVariant="dark"
+                            style={styles.dateTimePickerIOS}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </Modal>
+                ) : (
+                  <DateTimePicker
+                    value={dueDate || new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={handleDateChange}
+                    minimumDate={new Date()}
+                  />
+                )}
+              </>
             )}
 
+            {/* Time Picker - Modal dedicat pentru iOS */}
             {showTimePicker && (
-              <DateTimePicker
-                value={dueDate || new Date()}
-                mode="time"
-                display="default"
-                onChange={handleTimeChange}
-              />
+              <>
+                {Platform.OS === "ios" ? (
+                  <Modal
+                    visible={showTimePicker}
+                    transparent={true}
+                    animationType="slide"
+                    onRequestClose={handleCancelPicker}
+                  >
+                    <View style={styles.pickerModalOverlay}>
+                      <View style={styles.pickerModalContainer}>
+                        <View style={styles.pickerModalHeader}>
+                          <TouchableOpacity onPress={handleCancelPicker}>
+                            <Text style={styles.pickerModalButton}>Cancel</Text>
+                          </TouchableOpacity>
+                          <Text style={styles.pickerModalTitle}>
+                            Select Time
+                          </Text>
+                          <TouchableOpacity onPress={handleConfirmTime}>
+                            <Text
+                              style={[
+                                styles.pickerModalButton,
+                                styles.pickerModalButtonConfirm,
+                              ]}
+                            >
+                              Done
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.pickerContent}>
+                          <DateTimePicker
+                            value={tempDate}
+                            mode="time"
+                            display="spinner"
+                            onChange={handleTimeChange}
+                            textColor="#ffffff"
+                            themeVariant="dark"
+                            style={styles.dateTimePickerIOS}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </Modal>
+                ) : (
+                  <DateTimePicker
+                    value={dueDate || new Date()}
+                    mode="time"
+                    display="default"
+                    onChange={handleTimeChange}
+                  />
+                )}
+              </>
             )}
           </ScrollView>
 
           <View
             style={[
               styles.footer,
-              { paddingBottom: Math.max(insets.bottom, 20) },
+              { paddingBottom: Math.max(bottomInset, 20) },
             ]}
           >
             <Button
@@ -515,10 +754,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#fff",
   },
+  timeRemainingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(96, 165, 250, 0.1)",
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+    gap: 6,
+  },
+  timeRemainingText: {
+    fontSize: 13,
+    color: "#60a5fa",
+  },
   clearButton: {
     marginBottom: 16,
   },
-  // 🆕 Styles pentru secțiunea de notificări
   notificationSection: {
     backgroundColor: "rgba(59, 130, 246, 0.1)",
     borderRadius: 12,
@@ -554,6 +805,22 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
   },
+  invalidNotificationBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.3)",
+  },
+  invalidNotificationText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#ef4444",
+  },
   warningBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -577,28 +844,49 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255, 255, 255, 0.1)",
   },
-  cancelButton: {
-    flex: 1,
-  },
   submitButton: {
     flex: 1,
   },
+  // Stiluri pentru iOS Date/Time Picker Modal
+  pickerModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerModalContainer: {
+    backgroundColor: "#1e293b",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 40,
+  },
+  pickerModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.1)",
+  },
+  pickerModalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#ffffff",
+  },
+  pickerModalButton: {
+    fontSize: 16,
+    color: "#9ca3af",
+    fontWeight: "500",
+  },
+  pickerModalButtonConfirm: {
+    color: "#3b82f6",
+    fontWeight: "600",
+  },
+  pickerContent: {
+    backgroundColor: "#0f172a",
+    paddingVertical: 20,
+  },
+  dateTimePickerIOS: {
+    backgroundColor: "#0f172a",
+    height: 200,
+  },
 });
-
-/* 
-NOTĂ IMPORTANTĂ:
-Pentru ca notificările să funcționeze corect cu task-uri noi, 
-trebuie să modifici funcția addTask din DataContext să returneze task-ul creat:
-
-const addTask = async (task: ...) => {
-  const { data, error } = await supabase
-    .from('tasks')
-    .insert({ ...task, user_id: user.id, order_index: tasks.length })
-    .select()
-    .single();  // ← adaugă .select().single()
-    
-  if (error) throw error;
-  await refreshData();
-  return data;  // ← returnează task-ul creat
-};
-*/
